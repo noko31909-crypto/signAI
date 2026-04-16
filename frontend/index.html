@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0a0a0f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SignAI">
+  <link rel="manifest" href="manifest.json">
+  <title>SignAI — Распознавание жестов</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: #12121a;
+      --surface2: #1a1a26;
+      --accent: #7c3aed;
+      --accent2: #06d6a0;
+      --accent3: #f72585;
+      --text: #f0eeff;
+      --muted: #6b6a8a;
+      --border: rgba(124, 58, 237, 0.25);
+      --glow: rgba(124, 58, 237, 0.4);
+    }
+
+    html, body {
+      height: 100%; width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Syne', sans-serif;
+      overflow: hidden;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    #app {
+      height: 100dvh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 0;
+      position: relative;
+    }
+
+    /* ── HEADER ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      background: rgba(10,10,15,0.9);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+    }
+
+    .logo {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #7c3aed, #06d6a0);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: all 0.3s;
+      box-shadow: 0 0 0 2px transparent;
+    }
+    .status-dot.connected { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); }
+    .status-dot.error { background: var(--accent3); box-shadow: 0 0 8px var(--accent3); }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* ── CAMERA AREA ── */
+    .camera-wrap {
+      position: relative;
+      overflow: hidden;
+      background: #000;
+    }
+
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      display: block;
+    }
+
+    /* Scanning overlay */
+    .scan-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .scan-corners {
+      position: absolute;
+      inset: 20px;
+    }
+    .scan-corners::before, .scan-corners::after,
+    .corner-br, .corner-bl {
+      content: '';
+      position: absolute;
+      width: 28px; height: 28px;
+      border-color: var(--accent);
+      border-style: solid;
+    }
+    .scan-corners::before { top: 0; left: 0; border-width: 3px 0 0 3px; border-radius: 4px 0 0 0; }
+    .scan-corners::after  { top: 0; right: 0; border-width: 3px 3px 0 0; border-radius: 0 4px 0 0; }
+    .corner-br { bottom: 0; right: 0; border-width: 0 3px 3px 0; border-radius: 0 0 4px 0; }
+    .corner-bl { bottom: 0; left: 0; border-width: 0 0 3px 3px; border-radius: 0 0 0 4px; }
+
+    /* Gesture display on camera */
+    .gesture-live {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      padding: 20px;
+      background: linear-gradient(to top, rgba(10,10,15,0.95) 0%, transparent 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .gesture-word {
+      font-size: clamp(36px, 10vw, 64px);
+      font-weight: 800;
+      letter-spacing: -1px;
+      color: var(--text);
+      min-height: 1.2em;
+      text-align: center;
+      transition: all 0.2s;
+      text-shadow: 0 0 40px var(--glow);
+    }
+    .gesture-word.flash {
+      color: var(--accent2);
+      text-shadow: 0 0 60px rgba(6,214,160,0.6);
+    }
+
+    .confidence-bar-wrap {
+      width: min(240px, 70vw);
+      height: 3px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .confidence-bar {
+      height: 100%;
+      background: var(--accent2);
+      border-radius: 2px;
+      transition: width 0.2s;
+    }
+
+    /* ── BOTTOM PANEL ── */
+    .bottom-panel {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* History */
+    .history-row {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+      min-height: 36px;
+      align-items: center;
+    }
+    .history-row::-webkit-scrollbar { display: none; }
+
+    .history-chip {
+      flex-shrink: 0;
+      padding: 6px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.2s;
+      animation: chipIn 0.3s ease;
+    }
+    .history-chip:hover { background: var(--accent); border-color: var(--accent); }
+    .history-chip:active { transform: scale(0.95); }
+
+    @keyframes chipIn {
+      from { opacity: 0; transform: scale(0.7) translateY(8px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .history-empty {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .btn-main {
+      flex: 1;
+      height: 52px;
+      border: none;
+      border-radius: 14px;
+      font-family: 'Syne', sans-serif;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      letter-spacing: 0.3px;
+    }
+    .btn-start {
+      background: linear-gradient(135deg, #7c3aed, #5b21b6);
+      color: #fff;
+      box-shadow: 0 4px 20px rgba(124,58,237,0.4);
+    }
+    .btn-start:active { transform: scale(0.97); box-shadow: 0 2px 10px rgba(124,58,237,0.3); }
+    .btn-stop {
+      background: rgba(247,37,133,0.15);
+      color: var(--accent3);
+      border: 1px solid rgba(247,37,133,0.4);
+    }
+    .btn-stop:active { transform: scale(0.97); }
+
+    .btn-icon {
+      width: 52px; height: 52px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--muted);
+      font-size: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .btn-icon:active { transform: scale(0.95); background: var(--accent); color: white; }
+    .btn-icon.active { background: rgba(6,214,160,0.15); color: var(--accent2); border-color: rgba(6,214,160,0.4); }
+
+    /* Setup screen */
+    #setup-screen {
+      position: absolute;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      padding: 40px;
+      z-index: 20;
+      text-align: center;
+    }
+
+    .setup-icon {
+      font-size: 64px;
+      animation: float 3s ease-in-out infinite;
+    }
+    @keyframes float {
+      0%,100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    .setup-title { font-size: 28px; font-weight: 800; }
+    .setup-sub {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.6;
+      max-width: 280px;
+    }
+
+    .server-input-wrap {
+      width: 100%;
+      max-width: 320px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .server-input-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      text-align: left;
+    }
+    .server-input {
+      width: 100%;
+      padding: 14px 16px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .server-input:focus { border-color: var(--accent); }
+
+    .btn-connect {
+      width: 100%;
+      max-width: 320px;
+      height: 56px;
+      background: linear-gradient(135deg, #7c3aed, #5b21b6);
+      border: none;
+      border-radius: 14px;
+      color: #fff;
+      font-family: 'Syne', sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 24px rgba(124,58,237,0.5);
+      transition: all 0.2s;
+    }
+    .btn-connect:active { transform: scale(0.97); }
+
+    .error-msg {
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+      color: var(--accent3);
+      min-height: 18px;
+    }
+
+    /* Speech indicator */
+    .speech-flash {
+      position: absolute;
+      top: 14px;
+      right: 20px;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--accent2);
+      opacity: 0;
+      transition: opacity 0.15s;
+      box-shadow: 0 0 10px var(--accent2);
+    }
+    .speech-flash.on { opacity: 1; }
+
+    /* fps counter */
+    #fps {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">SignAI</div>
+    <div class="header-right">
+      <span id="fps">— fps</span>
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">Не подключено</span>
+    </div>
+  </header>
+
+  <div class="camera-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas" style="display:none"></canvas>
+
+    <div class="scan-overlay">
+      <div class="scan-corners">
+        <div class="corner-br"></div>
+        <div class="corner-bl"></div>
+      </div>
+      <div class="speech-flash" id="speech-flash"></div>
+    </div>
+
+    <div class="gesture-live">
+      <div class="gesture-word" id="gesture-display">—</div>
+      <div class="confidence-bar-wrap">
+        <div class="confidence-bar" id="conf-bar" style="width:0%"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom-panel">
+    <div class="history-row" id="history">
+      <span class="history-empty">Распознанные жесты появятся здесь</span>
+    </div>
+    <div class="controls">
+      <button class="btn-main btn-start" id="btn-start" onclick="startCamera()">
+        <span>▶</span> Запустить камеру
+      </button>
+      <button class="btn-icon" id="btn-sound" onclick="toggleSound()" title="Озвучивать жесты">🔊</button>
+      <button class="btn-icon" id="btn-clear" onclick="clearHistory()" title="Очистить историю">🗑</button>
+    </div>
+  </div>
+</div>
+
+<!-- Setup Screen -->
+<div id="setup-screen">
+  <div class="setup-icon">🤟</div>
+  <div class="setup-title">SignAI</div>
+  <div class="setup-sub">Распознавание языка жестов через камеру в реальном времени</div>
+  <div class="server-input-wrap">
+    <div class="server-input-label">АДРЕС СЕРВЕРА (WebSocket)</div>
+    <input class="server-input" id="server-url" type="text" value="ws://localhost:8000" placeholder="ws://192.168.1.10:8000">
+  </div>
+  <button class="btn-connect" onclick="connectToServer()">Подключиться</button>
+  <div class="error-msg" id="error-msg"></div>
+</div>
+
+<script>
+let ws = null;
+let stream = null;
+let capturing = false;
+let soundEnabled = true;
+let serverUrl = '';
+let history = [];
+let lastGesture = null;
+let frameCount = 0;
+let lastFpsTime = Date.now();
+
+const videoEl = document.getElementById('video');
+const canvasEl = document.getElementById('canvas');
+const ctx = canvasEl.getContext('2d');
+const gestureDisplay = document.getElementById('gesture-display');
+const confBar = document.getElementById('conf-bar');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+const historyEl = document.getElementById('history');
+const speechFlash = document.getElementById('speech-flash');
+const btnStart = document.getElementById('btn-start');
+const btnSound = document.getElementById('btn-sound');
+const fpsEl = document.getElementById('fps');
+
+function connectToServer() {
+  const url = document.getElementById('server-url').value.trim();
+  if (!url) return;
+  serverUrl = url;
+
+  const errEl = document.getElementById('error-msg');
+  errEl.textContent = 'Подключение...';
+
+  const testWs = new WebSocket(url + '/ws/test-' + Date.now());
+  testWs.onopen = () => {
+    testWs.close();
+    document.getElementById('setup-screen').style.display = 'none';
+    setStatus('connected', 'Подключено');
+    localStorage.setItem('signai-server', url);
+  };
+  testWs.onerror = () => {
+    errEl.textContent = 'Не удалось подключиться. Проверь адрес и запущен ли сервер.';
+  };
+}
+
+function setStatus(state, text) {
+  statusDot.className = 'status-dot ' + (state || '');
+  statusText.textContent = text;
+}
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+    videoEl.srcObject = stream;
+    await videoEl.play();
+
+    canvasEl.width = 320;
+    canvasEl.height = 240;
+
+    // Connect WebSocket
+    const clientId = 'client-' + Date.now();
+    ws = new WebSocket(serverUrl + '/ws/' + clientId);
+    ws.onopen = () => { capturing = true; captureLoop(); };
+    ws.onclose = () => { setStatus('error', 'Соединение потеряно'); capturing = false; sending = false; clearTimeout(sendTimeout); };
+    ws.onerror = () => { setStatus('error', 'Ошибка WS'); sending = false; clearTimeout(sendTimeout); };
+    ws.onmessage = handleResult;
+
+    btnStart.innerHTML = '<span>⏹</span> Остановить';
+    btnStart.className = 'btn-main btn-stop';
+    btnStart.onclick = stopCamera;
+
+  } catch (e) {
+    alert('Нет доступа к камере: ' + e.message);
+  }
+}
+
+function stopCamera() {
+  capturing = false;
+  if (ws) ws.close();
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  videoEl.srcObject = null;
+  gestureDisplay.textContent = '—';
+  confBar.style.width = '0%';
+  btnStart.innerHTML = '<span>▶</span> Запустить камеру';
+  btnStart.className = 'btn-main btn-start';
+  btnStart.onclick = startCamera;
+  setStatus('connected', 'Подключено');
+}
+
+let sending = false;
+let sendTimeout = null;
+
+function captureLoop() {
+  if (!capturing) return;
+
+  // FPS counter
+  frameCount++;
+  const now = Date.now();
+  if (now - lastFpsTime > 1000) {
+    fpsEl.textContent = frameCount + ' fps';
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+
+  if (!sending && ws && ws.readyState === WebSocket.OPEN) {
+    sending = true;
+    // Safety timeout: if no response in 3s, unlock
+    sendTimeout = setTimeout(() => { sending = false; }, 3000);
+    ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+    canvasEl.toBlob(blob => {
+      if (!blob) { sending = false; clearTimeout(sendTimeout); return; }
+      blob.arrayBuffer().then(buf => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(buf);
+        } else {
+          sending = false;
+          clearTimeout(sendTimeout);
+        }
+      }).catch(() => { sending = false; clearTimeout(sendTimeout); });
+    }, 'image/jpeg', 0.7);
+  }
+
+  requestAnimationFrame(captureLoop);
+}
+
+function handleResult(evt) {
+  clearTimeout(sendTimeout);
+  sending = false;
+  let data;
+  try { data = JSON.parse(evt.data); } catch { return; }
+  if (data.gesture) {
+    gestureDisplay.textContent = data.gesture;
+    confBar.style.width = (data.confidence * 100) + '%';
+
+    if (data.is_new_gesture && data.spoken_gesture) {
+      // Flash animation
+      gestureDisplay.classList.add('flash');
+      setTimeout(() => gestureDisplay.classList.remove('flash'), 400);
+
+      // Speech
+      if (soundEnabled) {
+        speechFlash.classList.add('on');
+        const utterance = new SpeechSynthesisUtterance(data.spoken_gesture);
+        utterance.lang = 'en-US';
+        utterance.rate = 0.9;
+        utterance.onend = () => speechFlash.classList.remove('on');
+        speechSynthesis.speak(utterance);
+      }
+
+      // Add to history
+      addToHistory(data.spoken_gesture);
+    }
+  } else if (data.hands_detected === 0) {
+    gestureDisplay.textContent = '—';
+    confBar.style.width = '0%';
+  }
+}
+
+function addToHistory(gesture) {
+  history.unshift(gesture);
+  if (history.length > 20) history.pop();
+
+  const emptyEl = historyEl.querySelector('.history-empty');
+  if (emptyEl) emptyEl.remove();
+
+  const chip = document.createElement('div');
+  chip.className = 'history-chip';
+  chip.textContent = gesture;
+  chip.onclick = () => {
+    if (soundEnabled) {
+      const u = new SpeechSynthesisUtterance(gesture);
+      u.lang = 'en-US';
+      speechSynthesis.speak(u);
+    }
+  };
+  historyEl.insertBefore(chip, historyEl.firstChild);
+}
+
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  btnSound.textContent = soundEnabled ? '🔊' : '🔇';
+  btnSound.classList.toggle('active', !soundEnabled);
+}
+
+function clearHistory() {
+  historyEl.innerHTML = '<span class="history-empty">Распознанные жесты появятся здесь</span>';
+  history = [];
+}
+
+// Restore server URL
+const saved = localStorage.getItem('signai-server');
+if (saved) document.getElementById('server-url').value = saved;
+</script>
+</body>
+</html>
